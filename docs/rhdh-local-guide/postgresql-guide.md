@@ -7,7 +7,7 @@ If you want to use PostgreSQL with RHDH, here are the steps:
 
 The examples below use `podman` and `podman compose`. If you use Docker, replace `podman` with `docker` (for example `docker login`, `docker compose`, `docker exec`).
 
-Copy the `POSTGRES_*` values from `default.env` into your project `.env` (or ensure they are set in the environment).
+Copy the `POSTGRES_*` values from `default.env` into your project `.env` (or ensure they are set in the environment). You can pin the Postgres image with `POSTGRES_IMAGE` in `.env` (see `compose-with-db.yaml`).
 
 1. Login to container registry with *Red Hat Login* credentials to use `postgresql` image
 
@@ -15,31 +15,17 @@ Copy the `POSTGRES_*` values from `default.env` into your project `.env` (or ens
    podman login registry.redhat.io
    ```
 
-2. Start RHDH with the optional Postgres overlay [`compose-with-db.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose-with-db.yaml). Do not edit the default [`compose.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose.yaml).
+2. Start RHDH with the optional Postgres overlay [`compose-with-db.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose-with-db.yaml). Note that the order of the YAML files is important:
 
-   Note that the order of the YAML files is important:
-
-   === "Podman"
-       ```bash
-       podman compose -f compose.yaml -f compose-with-db.yaml up -d
-       ```
-
-   === "Docker"
-       ```bash
-       docker compose -f compose.yaml -f compose-with-db.yaml up -d
-       ```
+   ```sh
+   podman compose -f compose.yaml -f compose-with-db.yaml up -d
+   ```
 
    You can combine this with other overlays the same way. For example, with the [corporate proxy](corporate-proxy-setup-sim.md) setup:
 
-   === "Podman"
-       ```bash
-       podman compose -f compose.yaml -f compose-with-db.yaml -f compose-with-corporate-proxy.yaml up -d
-       ```
-
-   === "Docker"
-       ```bash
-       docker compose -f compose.yaml -f compose-with-db.yaml -f compose-with-corporate-proxy.yaml up -d
-       ```
+   ```sh
+   podman compose -f compose.yaml -f compose-with-db.yaml -f compose-with-corporate-proxy.yaml up -d
+   ```
 
 3. Comment out the SQLite in-memory configuration in [`app-config.local.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/configs/app-config/app-config.local.example.yaml)
 
@@ -83,7 +69,9 @@ The new image must support upgrading from your current major version (its `POSTG
 
 > **Warning:** Back up the Postgres data volume (or take a host-level snapshot) before upgrading. Stop RHDH first so nothing writes to the database during the upgrade. The `copy` mode needs roughly as much free space as the current data directory.
 
-In the commands below, keep every `-f` overlay you already use day to day (at least `-f compose.yaml -f compose-with-db.yaml`). If you also run with the corporate proxy, include `-f compose-with-corporate-proxy.yaml` on the same commands.
+Do not edit tracked [`compose-with-db.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose-with-db.yaml) for the upgrade. Put temporary settings in gitignored `compose.override.yaml` instead. Pulling a newer default image major in `compose-with-db.yaml` is not a silent safe upgrade for an existing data volume — follow the steps below when the image major changes.
+
+When using `-f compose-with-db.yaml`, Compose does not auto-load `compose.override.yaml`. Include it explicitly on upgrade commands. Keep every other `-f` overlay you already use (for example `-f compose-with-corporate-proxy.yaml`).
 
 ### Steps
 
@@ -100,24 +88,24 @@ In the commands below, keep every `-f` overlay you already use day to day (at le
    podman compose -f compose.yaml -f compose-with-db.yaml stop rhdh
    ```
 
-3. In [`compose-with-db.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose-with-db.yaml), set `db.image` to the newer Postgres image and add `POSTGRESQL_UPGRADE=copy` for this boot only:
+3. Point at the target major image and enable a one-time upgrade boot:
 
-   ```yaml
-   db:
-     image: "registry.redhat.io/<newer-postgresql-image>:latest"
-     # ...existing volumes, env_file, healthcheck...
-     environment:
-       - POSTGRESQL_ADMIN_PASSWORD=${POSTGRES_PASSWORD}
-       - POSTGRESQL_UPGRADE=copy
+   - In your project `.env`, set `POSTGRES_IMAGE` to the newer image (for example `registry.redhat.io/rhel10/postgresql-18:latest`).
+   - Copy the temporary override example (do not commit `compose.override.yaml`):
+
+   ```sh
+   cp compose.postgres-upgrade.override.example.yaml compose.override.yaml
    ```
+
+   That override only adds `POSTGRESQL_UPGRADE=copy` for this boot.
 
 4. Recreate and start the `db` **container** so it boots the new image against the **existing** data volume (do not run `compose down --volumes`):
 
    ```sh
-   podman compose -f compose.yaml -f compose-with-db.yaml up -d db
+   podman compose -f compose.yaml -f compose-with-db.yaml -f compose.override.yaml up -d db
    ```
 
-   Wait until `db` is healthy (`podman compose -f compose.yaml -f compose-with-db.yaml ps`), then confirm the new major version:
+   Wait until `db` is healthy (`podman compose -f compose.yaml -f compose-with-db.yaml -f compose.override.yaml ps`), then confirm the new major version:
 
    ```sh
    podman exec db psql -U postgres -c "SHOW server_version;"
@@ -134,11 +122,14 @@ In the commands below, keep every `-f` overlay you already use day to day (at le
    # podman exec db psql -U postgres -c 'ALTER DATABASE "<dbname>" REFRESH COLLATION VERSION;'
    ```
 
-6. Remove `POSTGRESQL_UPGRADE=copy` from `compose-with-db.yaml`, then force-recreate only the `db` **container** so the updated environment takes effect:
+6. Remove `POSTGRESQL_UPGRADE` by deleting `compose.override.yaml` (or stripping that env from it), then force-recreate only the `db` **container** so the updated environment takes effect:
 
    ```sh
+   rm compose.override.yaml
    podman compose -f compose.yaml -f compose-with-db.yaml up -d --force-recreate db
    ```
+
+   Keep `POSTGRES_IMAGE` in `.env` if you want to pin the major; otherwise the default from `compose-with-db.yaml` applies.
 
    `--force-recreate` replaces the container; it does **not** create a fresh database or wipe `/var/lib/pgsql/data`. Compose keeps the existing volume as long as you do not pass `--volumes` / `-v` to `down` or otherwise remove that volume.
 
@@ -152,6 +143,7 @@ In the commands below, keep every `-f` overlay you already use day to day (at le
 
 ### What not to do
 
+- Do not edit `compose-with-db.yaml` for upgrades (use `.env` + temporary `compose.override.yaml`).
 - Do not delete the Postgres data volume as part of this upgrade (`compose down --volumes`, `volume rm`, pruning volumes, etc.).
 - Do not treat `--force-recreate db` as a data reset — it only recreates the container.
 - Do not leave `POSTGRESQL_UPGRADE` set after the upgrade succeeds.
