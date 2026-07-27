@@ -15,38 +15,33 @@ Copy the `POSTGRES_*` values from `default.env` into your project `.env` (or ens
    podman login registry.redhat.io
    ```
 
-2. Uncomment the `db` service block in [https://github.com/redhat-developer/rhdh-local/blob/main/compose.yaml](https://github.com/redhat-developer/rhdh-local/blob/main/compose.yaml) file
+2. Start RHDH with the optional Postgres overlay [`compose-with-db.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose-with-db.yaml). Do not edit the default [`compose.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose.yaml).
 
-   ```yaml
-   db:
-     image: "registry.redhat.io/rhel10/postgresql-18:latest"
-     volumes:
-       - "/var/lib/pgsql/data"
-     env_file:
-       - path: "./default.env"
-         required: true
-       - path: "./.env"
-         required: false
-     environment:
-       - POSTGRESQL_ADMIN_PASSWORD=${POSTGRES_PASSWORD}
-     healthcheck:
-       test: ["CMD", "pg_isready", "-U", "postgres"]
-       interval: 5s
-       timeout: 5s
-       retries: 5
-   ```
+   Note that the order of the YAML files is important:
 
-3. Uncomment the `db` section in the `depends_on` section of `rhdh` service in [https://github.com/redhat-developer/rhdh-local/blob/main/compose.yaml](https://github.com/redhat-developer/rhdh-local/blob/main/compose.yaml)
+   === "Podman"
+       ```bash
+       podman compose -f compose.yaml -f compose-with-db.yaml up -d
+       ```
 
-   ```yaml
-   depends_on:
-     install-dynamic-plugins:
-       condition: service_completed_successfully
-     db:
-       condition: service_healthy
-   ```
+   === "Docker"
+       ```bash
+       docker compose -f compose.yaml -f compose-with-db.yaml up -d
+       ```
 
-4. Comment out the SQLite in-memory configuration in [`app-config.local.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/configs/app-config/app-config.local.example.yaml)
+   You can combine this with other overlays the same way. For example, with the [corporate proxy](corporate-proxy-setup-sim.md) setup:
+
+   === "Podman"
+       ```bash
+       podman compose -f compose.yaml -f compose-with-db.yaml -f compose-with-corporate-proxy.yaml up -d
+       ```
+
+   === "Docker"
+       ```bash
+       docker compose -f compose.yaml -f compose-with-db.yaml -f compose-with-corporate-proxy.yaml up -d
+       ```
+
+3. Comment out the SQLite in-memory configuration in [`app-config.local.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/configs/app-config/app-config.local.example.yaml)
 
    ```yaml
    # database:
@@ -54,7 +49,7 @@ Copy the `POSTGRES_*` values from `default.env` into your project `.env` (or ens
    #   connection: ':memory:'
    ```
 
-5. Add Postgres configuration in [`app-config.local.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/configs/app-config/app-config.local.example.yaml)
+4. Add Postgres configuration in [`app-config.local.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/configs/app-config/app-config.local.example.yaml)
 
    ```yaml
    database:
@@ -88,6 +83,8 @@ The new image must support upgrading from your current major version (its `POSTG
 
 > **Warning:** Back up the Postgres data volume (or take a host-level snapshot) before upgrading. Stop RHDH first so nothing writes to the database during the upgrade. The `copy` mode needs roughly as much free space as the current data directory.
 
+In the commands below, keep every `-f` overlay you already use day to day (at least `-f compose.yaml -f compose-with-db.yaml`). If you also run with the corporate proxy, include `-f compose-with-corporate-proxy.yaml` on the same commands.
+
 ### Steps
 
 1. Note your current Postgres version and image:
@@ -100,10 +97,10 @@ The new image must support upgrading from your current major version (its `POSTG
 2. Stop RHDH so it does not write during the upgrade:
 
    ```sh
-   podman compose stop rhdh
+   podman compose -f compose.yaml -f compose-with-db.yaml stop rhdh
    ```
 
-3. In `compose.yaml`, set `db.image` to the newer Postgres image and add `POSTGRESQL_UPGRADE=copy` for this boot only:
+3. In [`compose-with-db.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose-with-db.yaml), set `db.image` to the newer Postgres image and add `POSTGRESQL_UPGRADE=copy` for this boot only:
 
    ```yaml
    db:
@@ -117,10 +114,10 @@ The new image must support upgrading from your current major version (its `POSTG
 4. Recreate and start the `db` **container** so it boots the new image against the **existing** data volume (do not run `compose down --volumes`):
 
    ```sh
-   podman compose up -d db
+   podman compose -f compose.yaml -f compose-with-db.yaml up -d db
    ```
 
-   Wait until `db` is healthy (`podman compose ps`), then confirm the new major version:
+   Wait until `db` is healthy (`podman compose -f compose.yaml -f compose-with-db.yaml ps`), then confirm the new major version:
 
    ```sh
    podman exec db psql -U postgres -c "SHOW server_version;"
@@ -137,10 +134,10 @@ The new image must support upgrading from your current major version (its `POSTG
    # podman exec db psql -U postgres -c 'ALTER DATABASE "<dbname>" REFRESH COLLATION VERSION;'
    ```
 
-6. Remove `POSTGRESQL_UPGRADE=copy` from `compose.yaml`, then force-recreate only the `db` **container** so the updated environment takes effect:
+6. Remove `POSTGRESQL_UPGRADE=copy` from `compose-with-db.yaml`, then force-recreate only the `db` **container** so the updated environment takes effect:
 
    ```sh
-   podman compose up -d --force-recreate db
+   podman compose -f compose.yaml -f compose-with-db.yaml up -d --force-recreate db
    ```
 
    `--force-recreate` replaces the container; it does **not** create a fresh database or wipe `/var/lib/pgsql/data`. Compose keeps the existing volume as long as you do not pass `--volumes` / `-v` to `down` or otherwise remove that volume.
@@ -148,7 +145,7 @@ The new image must support upgrading from your current major version (its `POSTG
 7. Start RHDH again and verify the instance:
 
    ```sh
-   podman compose up -d rhdh
+   podman compose -f compose.yaml -f compose-with-db.yaml up -d rhdh
    ```
 
    Open [http://localhost:7007](http://localhost:7007) and confirm your catalog (or other persisted data) is still present.
