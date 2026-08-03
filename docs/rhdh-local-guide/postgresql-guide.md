@@ -91,7 +91,7 @@ When using `-f compose-with-db.yaml`, Compose does not auto-load `compose.overri
 3. Point at the target major image and enable a one-time upgrade boot:
 
    - In your project `.env`, set `POSTGRES_IMAGE` to the newer image (for example `registry.redhat.io/rhel10/postgresql-18:latest`).
-   - Copy the temporary override example (do not commit `compose.override.yaml`):
+   - Copy the temporary override example:
 
    ```sh
    cp compose.postgres-upgrade.override.example.yaml compose.override.yaml
