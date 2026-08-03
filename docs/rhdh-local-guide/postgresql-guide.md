@@ -7,7 +7,7 @@ If you want to use PostgreSQL with RHDH, here are the steps:
 
 The examples below use `podman` and `podman compose`. If you use Docker, replace `podman` with `docker` (for example `docker login`, `docker compose`, `docker exec`).
 
-Copy the `POSTGRES_*` values from `default.env` into your project `.env` (or ensure they are set in the environment). You can pin the Postgres image with `POSTGRES_IMAGE` in `.env` (see `compose-with-db.yaml`).
+Copy the `POSTGRES_*` values from `default.env` into your project `.env` (or ensure they are set in the environment). You can pin the Postgres image with `POSTGRES_IMAGE` in `.env` (see [`compose-with-db.yaml`](https://github.com/redhat-developer/rhdh-local/blob/main/compose-with-db.yaml)).
 
 1. Login to container registry with *Red Hat Login* credentials to use `postgresql` image
 
